@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Finanzas BBVA - Débito en Vivo</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#004481', // Azul BBVA clásico
+              600: '#043263',
+              accent: '#00d1b2', // Turquesa BBVA
+              neon: '#10b981'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .live-pulse {
+      animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes slide-in-top {
+      0% { transform: translateY(-20px); opacity: 0; background-color: rgba(16, 185, 129, 0.25); }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    .new-tx-animate {
+      animation: slide-in-top 0.6s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-brand-accent selection:text-slate-950">
+
+  <!-- TOP NAVIGATION -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+          <i data-lucide="wallet" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-lg font-bold text-white tracking-wide">BBVA LiveTracker</h1>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-900/60 text-blue-300 border border-blue-700/50">Débito</span>
+          </div>
+          <p class="text-xs text-slate-400">Control Financiero en Tiempo Real</p>
+        </div>
+      </div>
+
+      <!-- Live Connection Pill & Actions -->
+      <div class="flex items-center space-x-3">
+        
+        <!-- Live Status Pill -->
+        <div id="status-pill" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-600/40 text-emerald-400 text-xs font-medium">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 live-pulse"></span>
+          <span id="status-text">Conectado en Vivo</span>
+        </div>
+
+        <!-- Sound Toggle -->
+        <button id="sound-btn" onclick="toggleSound()" class="p-2 text-slate-400 hover:text-white bg-slate-800/80 border border-slate-700 rounded-lg hover:bg-slate-700 transition" title="Activar/Silenciar Alerta Sonora">
+          <i data-lucide="volume-2" id="sound-icon" class="w-4 h-4 text-emerald-400"></i>
+        </button>
+
+        <!-- Setup Mobile Modal Button -->
+        <button onclick="openModal('setup-modal')" class="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium rounded-lg transition">
+          <i data-lucide="smartphone" class="w-4 h-4 text-cyan-400"></i>
+          <span>Celular (A56)</span>
+        </button>
+
+        <!-- Simulator Modal Button -->
+        <button onclick="openModal('sim-modal')" class="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-blue-600/20 transition">
+          <i data-lucide="play" class="w-3.5 h-3.5"></i>
+          <span>Simulador</span>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI CARDS -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- KPI 1: Gastado este Mes -->
+      <div class="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-xs uppercase font-medium tracking-wider text-slate-400">Gastado este Mes</p>
+            <h3 id="kpi-total-month" class="text-2xl font-black text-white mt-1 tracking-tight">$0.00</h3>
+          </div>
+          <div class="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            <i data-lucide="credit-card" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <p id="kpi-count-month" class="text-xs text-slate-400 mt-3 flex items-center">
+          <span class="text-slate-300 font-semibold mr-1">0</span> compras registradas
+        </p>
+        <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-400 opacity-80"></div>
+      </div>
+
+      <!-- KPI 2: Gastado Hoy -->
+      <div class="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-xs uppercase font-medium tracking-wider text-slate-400">Gastado Hoy</p>
+            <h3 id="kpi-total-today" class="text-2xl font-black text-emerald-400 mt-1 tracking-tight">$0.00</h3>
+          </div>
+          <div class="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <i data-lucide="zap" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <p id="kpi-count-today" class="text-xs text-slate-400 mt-3 flex items-center">
+          <span class="text-slate-300 font-semibold mr-1">0</span> movimientos hoy
+        </p>
+        <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400 opacity-80"></div>
+      </div>
+
+      <!-- KPI 3: Presupuesto & Restante -->
+      <div class="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <div class="flex items-center space-x-1.5">
+              <p class="text-xs uppercase font-medium tracking-wider text-slate-400">Presupuesto</p>
+              <button onclick="promptBudget()" class="text-slate-400 hover:text-white" title="Editar presupuesto">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <h3 id="kpi-remaining-budget" class="text-2xl font-black text-cyan-400 mt-1 tracking-tight">$0.00</h3>
+          </div>
+          <div class="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+            <i data-lucide="pie-chart" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <!-- Progress bar -->
+        <div class="mt-3">
+          <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span id="kpi-percent-spent">0% consumido</span>
+            <span id="kpi-total-budget" class="text-slate-400">Meta: $15,000</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+            <div id="budget-bar" class="bg-gradient-to-r from-cyan-500 to-blue-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI 4: Tarjeta & Enlace -->
+      <div class="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-xs uppercase font-medium tracking-wider text-slate-400">Dispositivo Enlazado</p>
+            <h3 class="text-xl font-bold text-white mt-1 tracking-tight">Samsung A56</h3>
+          </div>
+          <div class="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            <i data-lucide="smartphone-nfc" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="flex items-center justify-between text-xs text-slate-400 mt-3 pt-1 border-t border-slate-800">
+          <span>Banco: <strong class="text-blue-400">BBVA Débito</strong></span>
+          <span class="text-emerald-400 font-medium">Receptor Listo</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CHARTS SECTION -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Trend Area Chart (Span 2) -->
+      <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="trending-up" class="w-4 h-4 text-blue-400"></i>
+              <span>Tendencia de Gastos Diarios</span>
+            </h2>
+            <p class="text-xs text-slate-400">Histórico de compras en el mes actual</p>
+          </div>
+          <span class="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">Mes en curso</span>
+        </div>
+        <div class="relative h-64 w-full">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Categories Donut Chart (Span 1) -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="donut" class="w-4 h-4 text-cyan-400"></i>
+              <span>Gastos por Categoría</span>
+            </h2>
+            <p class="text-xs text-slate-400">Distribución de tu dinero</p>
+          </div>
+        </div>
+        <div class="relative h-56 w-full flex items-center justify-center">
+          <canvas id="categoryChart"></canvas>
+        </div>
+        <div id="category-legend" class="mt-2 space-y-1 text-xs max-h-24 overflow-y-auto pr-1">
+          <!-- Dynamic legend entries -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TRANSACTIONS TABLE & FEED -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+      
+      <!-- Table Header & Controls -->
+      <div class="p-5 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="text-lg font-bold text-white">Transacciones en Tiempo Real</h2>
+            <span id="tx-total-badge" class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs border border-slate-700 font-mono">0</span>
+          </div>
+          <p class="text-xs text-slate-400">Las compras realizadas con tu débito BBVA aparecen aquí al instante</p>
+        </div>
+
+        <!-- Filter & Search Controls -->
+        <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <!-- Category Filter -->
+          <select id="category-filter" onchange="filterTransactions()" class="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            <option value="all">Todas las Categorías</option>
+            <option value="Alimentos & Restaurantes">Alimentos & Restaurantes</option>
+            <option value="Supermercado & Abarrotes">Supermercado & Abarrotes</option>
+            <option value="Transporte & Movilidad">Transporte & Movilidad</option>
+            <option value="Salud & Farmacias">Salud & Farmacias</option>
+            <option value="Servicios & Suscripciones">Servicios & Suscripciones</option>
+            <option value="Entretenimiento & Ocio">Entretenimiento & Ocio</option>
+            <option value="Compras & Ropa">Compras & Ropa</option>
+            <option value="Otros Gastos">Otros Gastos</option>
+          </select>
+
+          <!-- Search Input -->
+          <div class="relative flex-1 sm:w-48">
+            <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5"></i>
+            <input type="text" id="search-input" oninput="filterTransactions()" placeholder="Buscar comercio..." class="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          </div>
+
+          <!-- Add Manual Expense Button -->
+          <button onclick="openModal('manual-modal')" class="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-200 hover:text-white transition" title="Agregar gasto manual">
+            <i data-lucide="plus" class="w-4 h-4 text-emerald-400"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Transactions List / Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-950/60 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+            <tr>
+              <th class="py-3 px-4">Comercio / Detalle</th>
+              <th class="py-3 px-4">Categoría</th>
+              <th class="py-3 px-4">Método / Tarjeta</th>
+              <th class="py-3 px-4">Fecha y Hora</th>
+              <th class="py-3 px-4 text-right">Monto</th>
+              <th class="py-3 px-4 text-center">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="transactions-tbody" class="divide-y divide-slate-800/60">
+            <!-- Dynamic rows injected here -->
+            <tr>
+              <td colspan="6" class="text-center py-12 text-slate-500">
+                <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+                Esperando compras... ¡Usa el simulador o realiza una compra con tu débito!
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ============================================================ -->
+  <!-- MODAL 1: SIMULADOR DE NOTIFICACIÓN BBVA                      -->
+  <!-- ============================================================ -->
+  <div id="sim-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="zap" class="w-5 h-5 text-amber-400"></i>
+          <span>Simulador de Notificaciones BBVA</span>
+        </h3>
+        <button onclick="closeModal('sim-modal')" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 mb-4">
+        Prueba cómo el sistema recibe, procesa y actualiza la pantalla al instante como si llegara la notificación a tu celular:
+      </p>
+
+      <!-- Presets Grid -->
+      <div class="grid grid-cols-2 gap-2.5 mb-4">
+        <button onclick="sendSimulatePreset('oxxo')" class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition">
+          <span class="text-xl">🏪</span>
+          <div>
+            <div class="font-bold text-xs text-white">OXXO</div>
+            <div class="text-[11px] text-emerald-400 font-semibold">$48.50 MXN</div>
+          </div>
+        </button>
+
+        <button onclick="sendSimulatePreset('uber')" class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition">
+          <span class="text-xl">🚗</span>
+          <div>
+            <div class="font-bold text-xs text-white">Uber Rides</div>
+            <div class="text-[11px] text-emerald-400 font-semibold">$142.30 MXN</div>
+          </div>
+        </button>
+
+        <button onclick="sendSimulatePreset('walmart')" class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition">
+          <span class="text-xl">🛒</span>
+          <div>
+            <div class="font-bold text-xs text-white">Walmart Super</div>
+            <div class="text-[11px] text-emerald-400 font-semibold">$890.00 MXN</div>
+          </div>
+        </button>
+
+        <button onclick="sendSimulatePreset('farmacia')" class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition">
+          <span class="text-xl">💊</span>
+          <div>
+            <div class="font-bold text-xs text-white">Farmacias GDL</div>
+            <div class="text-[11px] text-emerald-400 font-semibold">$215.00 MXN</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- Custom Raw Text Input -->
+      <div class="space-y-2">
+        <label class="text-xs font-semibold text-slate-300">O ingresa un texto de notificación exacto de BBVA:</label>
+        <textarea id="sim-custom-text" rows="2" placeholder="BBVA México: Compra por $350.00 en RESTAURANTE LA PALAPA con t. débito terminación 8921" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"></textarea>
+        <button onclick="sendSimulateCustom()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl transition shadow-lg shadow-blue-600/30">
+          Procesar Texto Personalizado
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL 2: CONFIGURACIÓN EN SAMSUNG A56 (MacroDroid)           -->
+  <!-- ============================================================ -->
+  <div id="setup-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="smartphone" class="w-5 h-5 text-cyan-400"></i>
+          <span>Vincular Samsung Galaxy A56 con MacroDroid</span>
+        </h3>
+        <button onclick="closeModal('setup-modal')" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs text-slate-300 leading-relaxed">
+        <div class="p-3 rounded-xl bg-blue-950/40 border border-blue-800/50">
+          <p class="font-semibold text-blue-200 mb-1">Tu Endpoint de Webhook:</p>
+          <div class="flex items-center space-x-2">
+            <input type="text" id="webhook-url-input" readonly value="http://TU_IP_O_TUNEL:8000/api/webhook/bbva" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-cyan-400 text-xs">
+            <button onclick="copyWebhookUrl()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700">Copiar</button>
+          </div>
+        </div>
+
+        <ol class="space-y-3 list-decimal list-inside text-slate-300">
+          <li><strong>Descarga MacroDroid</strong> gratis desde Google Play Store en tu Samsung A56.</li>
+          <li>En MacroDroid, toca <strong>«Añadir Macro»</strong>:
+            <ul class="list-disc list-inside ml-4 mt-1 space-y-1 text-slate-400">
+              <li><strong class="text-emerald-400">Disparador (Trigger):</strong> Notificaciones $\rightarrow$ Notificación recibida $\rightarrow$ Seleccionar Aplicación $\rightarrow$ Marca <strong>BBVA México</strong> (o SMS si recibes por SMS).</li>
+              <li><strong class="text-blue-400">Acción:</strong> Conectividad $\rightarrow$ <strong>Solicitud HTTP (HTTP Request)</strong>:
+                <div class="ml-4 mt-1 bg-slate-950 p-2.5 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 space-y-1">
+                  <div>• Método: <strong>POST</strong></div>
+                  <div>• URL: <span class="text-cyan-400 font-semibold">[Pega la URL del túnel o IP local]</span></div>
+                  <div>• Content-Type: <strong>application/json</strong></div>
+                  <div>• Contenido / Body: <code class="text-amber-300">{"text": "[not_text]", "title": "[not_title]"}</code></div>
+                </div>
+              </li>
+            </ul>
+          </li>
+          <li>Guarda la Macro con el nombre <strong>«BBVA Débito Tracker»</strong> y ¡listo!</li>
+        </ol>
+
+        <div class="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300">
+          <strong>Acceso desde cualquier lugar (4G/5G):</strong> Usa el script <code>start_tunnel.bat</code> incluido en el proyecto. Te dará una URL pública HTTPS gratuita de Cloudflare (ejemplo: <code>https://tu-token.trycloudflare.com/api/webhook/bbva</code>).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODAL 3: GASTO MANUAL                                       -->
+  <!-- ============================================================ -->
+  <div id="manual-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="plus-circle" class="w-5 h-5 text-emerald-400"></i>
+          <span>Registrar Gasto Manual</span>
+        </h3>
+        <button onclick="closeModal('manual-modal')" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="manual-form" onsubmit="submitManualExpense(event)" class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Monto ($ MXN)</label>
+          <input type="number" step="0.01" id="man-amount" required placeholder="Ej. 180.50" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Comercio</label>
+          <input type="text" id="man-merchant" required placeholder="Ej. Taquería El Paisa" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-medium mb-1">Categoría</label>
+          <select id="man-category" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            <option value="Alimentos & Restaurantes">Alimentos & Restaurantes</option>
+            <option value="Supermercado & Abarrotes">Supermercado & Abarrotes</option>
+            <option value="Transporte & Movilidad">Transporte & Movilidad</option>
+            <option value="Salud & Farmacias">Salud & Farmacias</option>
+            <option value="Servicios & Suscripciones">Servicios & Suscripciones</option>
+            <option value="Entretenimiento & Ocio">Entretenimiento & Ocio</option>
+            <option value="Compras & Ropa">Compras & Ropa</option>
+            <option value="Otros Gastos">Otros Gastos</option>
+          </select>
+        </div>
+        <div class="pt-2">
+          <button type="submit" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition shadow-lg shadow-emerald-600/30">
+            Guardar Gasto
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- APPLICATION JAVASCRIPT -->
+  <script src="/app.js"></script>
+</body>
+</html>
+
