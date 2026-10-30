@@ -9,10 +9,11 @@ class WebhookPayload(BaseModel):
     timestamp: Optional[str] = Field(None, description="Fecha/hora del dispositivo")
 
 class ManualTransaction(BaseModel):
-    amount: float = Field(..., gt=0, description="Monto del gasto")
-    merchant: str = Field(..., description="Nombre del comercio")
-    category: str = Field(..., description="Categoría del gasto")
-    transaction_type: Optional[str] = Field("Compra", description="Compra, Retiro, etc.")
+    amount: float = Field(..., gt=0, description="Monto de la transacción")
+    merchant: str = Field(..., description="Nombre del comercio, origen o destinatario")
+    category: str = Field(..., description="Categoría")
+    flow_type: Optional[str] = Field("egreso", description="'egreso' para gasto, 'ingreso' para entrada")
+    transaction_type: Optional[str] = Field("Compra", description="Compra, Transferencia, Depósito, etc.")
     card_type: Optional[str] = Field("Débito", description="Débito o Crédito")
     card_digits: Optional[str] = Field("", description="Últimos dígitos de la tarjeta")
     timestamp: Optional[str] = Field(None, description="Fecha de la transacción")
@@ -20,7 +21,7 @@ class ManualTransaction(BaseModel):
 class UpdateTransaction(BaseModel):
     category: Optional[str] = None
     merchant: Optional[str] = None
+    flow_type: Optional[str] = None
 
 class UpdateBudget(BaseModel):
     budget: float = Field(..., gt=0, description="Nuevo presupuesto mensual en MXN")
-

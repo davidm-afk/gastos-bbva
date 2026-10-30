@@ -19,6 +19,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 amount REAL NOT NULL,
                 currency TEXT DEFAULT 'MXN',
+                flow_type TEXT DEFAULT 'egreso',
                 merchant TEXT NOT NULL,
                 category TEXT NOT NULL,
                 transaction_type TEXT DEFAULT 'Compra',
@@ -30,13 +31,18 @@ def init_db():
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Asegurar columna flow_type si la tabla ya existía
+        try:
+            conn.execute("ALTER TABLE transactions ADD COLUMN flow_type TEXT DEFAULT 'egreso'")
+        except sqlite3.OperationalError:
+            pass  # Ya existe
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
         """)
-        # Presupuesto mensual predeterminado si no existe
         conn.execute("""
             INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_budget', '15000')
         """)
@@ -47,12 +53,13 @@ def insert_transaction(data: Dict[str, Any]) -> Dict[str, Any]:
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO transactions (
-            amount, currency, merchant, category, transaction_type,
+            amount, currency, flow_type, merchant, category, transaction_type,
             card_type, card_digits, raw_text, raw_title, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("amount", 0.0),
         data.get("currency", "MXN"),
+        data.get("flow_type", "egreso"),
         data.get("merchant", "Desconocido"),
         data.get("category", "Otros Gastos"),
         data.get("transaction_type", "Compra"),
@@ -65,19 +72,22 @@ def insert_transaction(data: Dict[str, Any]) -> Dict[str, Any]:
     new_id = cursor.lastrowid
     conn.commit()
     
-    # Obtener el registro completo recién creado
     cursor.execute("SELECT * FROM transactions WHERE id = ?", (new_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row)
 
-def get_transactions(limit: int = 100, category: Optional[str] = None, month: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_transactions(limit: int = 150, category: Optional[str] = None, flow_type: Optional[str] = None, month: Optional[str] = None) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
     query = "SELECT * FROM transactions WHERE 1=1"
     params = []
     
+    if flow_type and flow_type != "all":
+        query += " AND flow_type = ?"
+        params.append(flow_type)
+
     if category and category != "all":
         query += " AND category = ?"
         params.append(category)
@@ -103,16 +113,25 @@ def delete_transaction(tx_id: int) -> bool:
     conn.close()
     return deleted
 
-def update_transaction(tx_id: int, category: Optional[str] = None, merchant: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def update_transaction(tx_id: int, category: Optional[str] = None, merchant: Optional[str] = None, flow_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     with conn:
         cursor = conn.cursor()
-        if category and merchant:
-            cursor.execute("UPDATE transactions SET category = ?, merchant = ? WHERE id = ?", (category, merchant, tx_id))
-        elif category:
-            cursor.execute("UPDATE transactions SET category = ? WHERE id = ?", (category, tx_id))
-        elif merchant:
-            cursor.execute("UPDATE transactions SET merchant = ? WHERE id = ?", (merchant, tx_id))
+        updates = []
+        params = []
+        if category:
+            updates.append("category = ?")
+            params.append(category)
+        if merchant:
+            updates.append("merchant = ?")
+            params.append(merchant)
+        if flow_type:
+            updates.append("flow_type = ?")
+            params.append(flow_type)
+        
+        if updates:
+            params.append(tx_id)
+            cursor.execute(f"UPDATE transactions SET {', '.join(updates)} WHERE id = ?", params)
             
         cursor.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
         row = cursor.fetchone()
@@ -137,7 +156,7 @@ def set_budget(new_budget: float):
     conn.close()
 
 def get_analytics(month: Optional[str] = None) -> Dict[str, Any]:
-    """Calcula KPIs, distribución por categoría y serie temporal."""
+    """Calcula KPIs de ingresos, gastos, balance neto y gráficos."""
     if not month:
         month = datetime.now().strftime("%Y-%m")
         
@@ -146,57 +165,82 @@ def get_analytics(month: Optional[str] = None) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. Total gastado en el mes
-    cursor.execute("SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE strftime('%Y-%m', timestamp) = ?", (month,))
-    total_month = cursor.fetchone()['total']
+    # 1. Gastos (Egresos) en el mes
+    cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count 
+        FROM transactions 
+        WHERE strftime('%Y-%m', timestamp) = ? AND (flow_type = 'egreso' OR flow_type IS NULL)
+    """, (month,))
+    r_exp = cursor.fetchone()
+    total_expenses = r_exp['total']
+    count_expenses = r_exp['count']
+
+    # 2. Ingresos en el mes
+    cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count 
+        FROM transactions 
+        WHERE strftime('%Y-%m', timestamp) = ? AND flow_type = 'ingreso'
+    """, (month,))
+    r_inc = cursor.fetchone()
+    total_income = r_inc['total']
+    count_income = r_inc['count']
+
+    # 3. Gastos de hoy
+    cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0) as total 
+        FROM transactions 
+        WHERE strftime('%Y-%m-%d', timestamp) = ? AND (flow_type = 'egreso' OR flow_type IS NULL)
+    """, (today,))
+    total_today_expenses = cursor.fetchone()['total']
+
+    # 4. Ingresos de hoy
+    cursor.execute("""
+        SELECT COALESCE(SUM(amount), 0) as total 
+        FROM transactions 
+        WHERE strftime('%Y-%m-%d', timestamp) = ? AND flow_type = 'ingreso'
+    """, (today,))
+    total_today_income = cursor.fetchone()['total']
     
-    # 2. Total gastado hoy
-    cursor.execute("SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE strftime('%Y-%m-%d', timestamp) = ?", (today,))
-    total_today = cursor.fetchone()['total']
-    
-    # 3. Número de transacciones del mes
-    cursor.execute("SELECT COUNT(*) as count FROM transactions WHERE strftime('%Y-%m-%d', timestamp) = ?", (today,))
-    count_today = cursor.fetchone()['count']
-    
-    cursor.execute("SELECT COUNT(*) as count FROM transactions WHERE strftime('%Y-%m', timestamp) = ?", (month,))
-    count_month = cursor.fetchone()['count']
-    
-    # 4. Agrupado por Categoría en el mes
+    # 5. Agrupado por Categoría de Gastos
     cursor.execute("""
         SELECT category, COALESCE(SUM(amount), 0) as total, COUNT(*) as count
         FROM transactions
-        WHERE strftime('%Y-%m', timestamp) = ?
+        WHERE strftime('%Y-%m', timestamp) = ? AND (flow_type = 'egreso' OR flow_type IS NULL)
         GROUP BY category
         ORDER BY total DESC
     """, (month,))
-    by_category = [dict(r) for r in cursor.fetchall()]
-    
-    # 5. Agrupado por Día en el mes (para gráfico de tendencia)
+    by_category_expenses = [dict(r) for r in cursor.fetchall()]
+
+    # 6. Agrupado por Día (Gastos)
     cursor.execute("""
         SELECT strftime('%Y-%m-%d', timestamp) as day, COALESCE(SUM(amount), 0) as total
         FROM transactions
-        WHERE strftime('%Y-%m', timestamp) = ?
+        WHERE strftime('%Y-%m', timestamp) = ? AND (flow_type = 'egreso' OR flow_type IS NULL)
         GROUP BY day
         ORDER BY day ASC
     """, (month,))
-    by_day = [dict(r) for r in cursor.fetchall()]
+    by_day_expenses = [dict(r) for r in cursor.fetchall()]
     
     budget = get_budget()
-    remaining = max(0.0, budget - total_month)
-    percent_spent = round((total_month / budget * 100), 1) if budget > 0 else 0.0
+    remaining = max(0.0, budget - total_expenses)
+    percent_spent = round((total_expenses / budget * 100), 1) if budget > 0 else 0.0
+    net_balance = round(total_income - total_expenses, 2)
     
     conn.close()
     
     return {
         "month": month,
-        "total_month": round(total_month, 2),
-        "total_today": round(total_today, 2),
-        "count_today": count_today,
-        "count_month": count_month,
+        "total_month": round(total_expenses, 2),  # Gastos totales del mes
+        "total_income_month": round(total_income, 2), # Ingresos totales del mes
+        "net_balance": net_balance, # Saldo neto (Ingresos - Gastos)
+        "total_today": round(total_expenses_today, 2),
+        "total_income_today": round(total_today_income, 2),
+        "count_expenses": count_expenses,
+        "count_income": count_income,
+        "count_month": count_expenses + count_income,
         "budget": budget,
         "remaining_budget": round(remaining, 2),
         "percent_spent": percent_spent,
-        "by_category": by_category,
-        "by_day": by_day
+        "by_category": by_category_expenses,
+        "by_day": by_day_expenses
     }
-

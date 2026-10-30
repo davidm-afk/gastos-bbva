@@ -1,11 +1,10 @@
-// BBVA LiveTracker Frontend Application Logic
+// BBVA LiveTracker Frontend Logic - Ingresos, Gastos y Transferencias
 let ws = null;
 let soundEnabled = true;
 let allTransactions = [];
 let trendChartInstance = null;
 let categoryChartInstance = null;
 
-// Categorías y Colores
 const CATEGORY_COLORS = {
   "Alimentos & Restaurantes": "#f59e0b",
   "Supermercado & Abarrotes": "#10b981",
@@ -14,6 +13,11 @@ const CATEGORY_COLORS = {
   "Servicios & Suscripciones": "#8b5cf6",
   "Entretenimiento & Ocio": "#06b6d4",
   "Compras & Ropa": "#f97316",
+  "Transferencia Enviada": "#f43f5e",
+  "Transferencia Recibida": "#10b981",
+  "Nómina & Sueldo": "#059669",
+  "Depósito en Efectivo": "#14b8a6",
+  "Reembolsos & Devoluciones": "#06b6d4",
   "Financiero & Retiros": "#64748b",
   "Otros Gastos": "#94a3b8"
 };
@@ -26,41 +30,64 @@ const CATEGORY_ICONS = {
   "Servicios & Suscripciones": "receipt",
   "Entretenimiento & Ocio": "film",
   "Compras & Ropa": "shopping-bag",
+  "Transferencia Enviada": "send",
+  "Transferencia Recibida": "download",
+  "Nómina & Sueldo": "briefcase",
+  "Depósito en Efectivo": "banknote",
+  "Reembolsos & Devoluciones": "rotate-ccw",
   "Financiero & Retiros": "landmark",
   "Otros Gastos": "tag"
 };
 
-// --- SONIDO SINTETIZADO CON WEB AUDIO API ---
-function playNotificationChime() {
+// --- ALERTAS SONORAS DIFERENCIADAS (Ingreso vs Gasto) ---
+function playNotificationChime(isIncome = false) {
   if (!soundEnabled) return;
   try {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     
-    // Tono 1 (880 Hz)
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
-    gain1.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-    osc1.start();
-    osc1.stop(audioCtx.currentTime + 0.3);
+    if (isIncome) {
+      // Chime alegre ascendente para Ingreso (C5 -> E5 -> G5)
+      const notes = [523.25, 659.25, 783.99];
+      notes.forEach((freq, i) => {
+        setTimeout(() => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.35);
+        }, i * 110);
+      });
+    } else {
+      // Chime sutil para Gasto (A5 -> E6)
+      const osc1 = audioCtx.createOscillator();
+      const gain1 = audioCtx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain1.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      osc1.connect(gain1);
+      gain1.connect(audioCtx.destination);
+      osc1.start();
+      osc1.stop(audioCtx.currentTime + 0.3);
 
-    // Tono 2 (1318.5 Hz - E6)
-    setTimeout(() => {
-      const osc2 = audioCtx.createOscillator();
-      const gain2 = audioCtx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(1318.5, audioCtx.currentTime);
-      gain2.gain.setValueAtTime(0.15, audioCtx.currentTime);
-      gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-      osc2.connect(gain2);
-      gain2.connect(audioCtx.destination);
-      osc2.start();
-      osc2.stop(audioCtx.currentTime + 0.4);
-    }, 120);
+      setTimeout(() => {
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1318.5, audioCtx.currentTime);
+        gain2.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.start();
+        osc2.stop(audioCtx.currentTime + 0.4);
+      }, 120);
+    }
   } catch (e) {
     console.warn("Audio Context error:", e);
   }
@@ -73,7 +100,7 @@ function toggleSound() {
     icon.setAttribute("data-lucide", "volume-2");
     icon.classList.remove("text-slate-500");
     icon.classList.add("text-emerald-400");
-    playNotificationChime();
+    playNotificationChime(true);
   } else {
     icon.setAttribute("data-lucide", "volume-x");
     icon.classList.remove("text-emerald-400");
@@ -82,7 +109,7 @@ function toggleSound() {
   lucide.createIcons();
 }
 
-// --- CONEXIÓN WEBSOCKET EN TIEMPO REAL ---
+// --- WEBSOCKET EN VIVO ---
 function initWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -91,7 +118,7 @@ function initWebSocket() {
 
   ws.onopen = () => {
     updateStatusPill(true);
-    console.log("WebSocket conectado con éxito");
+    console.log("WebSocket conectado");
   };
 
   ws.onmessage = (event) => {
@@ -105,7 +132,6 @@ function initWebSocket() {
 
   ws.onclose = () => {
     updateStatusPill(false);
-    // Intentar reconectar automáticamente cada 3 segundos
     setTimeout(initWebSocket, 3000);
   };
 
@@ -117,11 +143,9 @@ function initWebSocket() {
 
 function updateStatusPill(connected) {
   const pill = document.getElementById("status-pill");
-  const text = document.getElementById("status-text");
-  
   if (connected) {
     pill.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-600/40 text-emerald-400 text-xs font-medium";
-    pill.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-400 live-pulse"></span><span>Conectado en Vivo</span>`;
+    pill.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-400 live-pulse"></span><span>Conectado 24/7</span>`;
   } else {
     pill.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full bg-rose-950/60 border border-rose-600/40 text-rose-400 text-xs font-medium";
     pill.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span><span>Reconectando...</span>`;
@@ -133,7 +157,8 @@ function handleSocketEvent(payload) {
     updateAnalyticsUI(payload.analytics);
     loadInitialTransactions();
   } else if (payload.event === "NEW_TRANSACTION") {
-    playNotificationChime();
+    const isIncome = payload.transaction.flow_type === "ingreso";
+    playNotificationChime(isIncome);
     prependTransactionRow(payload.transaction);
     updateAnalyticsUI(payload.analytics);
   } else if (payload.event === "UPDATE_TRANSACTION") {
@@ -147,23 +172,34 @@ function handleSocketEvent(payload) {
   }
 }
 
-// --- ACTUALIZACIÓN DE KPIS Y GRÁFICOS ---
+// --- ACTUALIZACIÓN DE KPIS ---
 function updateAnalyticsUI(analytics) {
   if (!analytics) return;
 
-  // Formato de moneda
   const fmt = (num) => `$${Number(num).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  document.getElementById("kpi-total-month").textContent = fmt(analytics.total_month);
-  document.getElementById("kpi-total-today").textContent = fmt(analytics.total_today);
+  document.getElementById("kpi-total-income").textContent = `+${fmt(analytics.total_income_month)}`;
+  document.getElementById("kpi-total-month").textContent = `-${fmt(analytics.total_month)}`;
+  
+  // Balance Neto
+  const net = analytics.net_balance;
+  const netEl = document.getElementById("kpi-net-balance");
+  if (net >= 0) {
+    netEl.textContent = `+${fmt(net)}`;
+    netEl.className = "text-2xl font-black text-emerald-400 mt-1 tracking-tight";
+  } else {
+    netEl.textContent = `-${fmt(Math.abs(net))}`;
+    netEl.className = "text-2xl font-black text-rose-400 mt-1 tracking-tight";
+  }
+
+  document.getElementById("kpi-count-income").innerHTML = `<span class="text-slate-300 font-semibold mr-1">${analytics.count_income || 0}</span> ingresos registrados`;
+  document.getElementById("kpi-count-month").innerHTML = `<span class="text-slate-300 font-semibold mr-1">${analytics.count_expenses || 0}</span> gastos registrados`;
+
+  // Presupuesto
   document.getElementById("kpi-remaining-budget").textContent = fmt(analytics.remaining_budget);
   document.getElementById("kpi-total-budget").textContent = `Meta: ${fmt(analytics.budget)}`;
   document.getElementById("kpi-percent-spent").textContent = `${analytics.percent_spent}% consumido`;
 
-  document.getElementById("kpi-count-month").innerHTML = `<span class="text-slate-300 font-semibold mr-1">${analytics.count_month}</span> compras registradas`;
-  document.getElementById("kpi-count-today").innerHTML = `<span class="text-slate-300 font-semibold mr-1">${analytics.count_today}</span> movimientos hoy`;
-
-  // Barra de progreso
   const budgetBar = document.getElementById("budget-bar");
   const pct = Math.min(100, analytics.percent_spent);
   budgetBar.style.width = `${pct}%`;
@@ -173,12 +209,11 @@ function updateAnalyticsUI(analytics) {
     budgetBar.className = "bg-gradient-to-r from-cyan-500 to-blue-500 h-2 rounded-full transition-all duration-500";
   }
 
-  // Actualizar gráficos
   renderTrendChart(analytics.by_day);
   renderCategoryChart(analytics.by_category);
 }
 
-// --- GRÁFICO DE TENDENCIA DIARIA ---
+// --- GRÁFICOS ---
 function renderTrendChart(byDay) {
   const ctx = document.getElementById("trendChart").getContext("2d");
   
@@ -199,12 +234,12 @@ function renderTrendChart(byDay) {
       datasets: [{
         label: 'Gasto Diario (MXN)',
         data: data,
-        borderColor: '#38bdf8',
-        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+        borderColor: '#f43f5e',
+        backgroundColor: 'rgba(244, 63, 94, 0.1)',
         borderWidth: 2.5,
         fill: true,
         tension: 0.35,
-        pointBackgroundColor: '#0284c7',
+        pointBackgroundColor: '#e11d48',
         pointRadius: 4,
         pointHoverRadius: 6
       }]
@@ -217,11 +252,11 @@ function renderTrendChart(byDay) {
         tooltip: {
           backgroundColor: '#0f172a',
           titleColor: '#e2e8f0',
-          bodyColor: '#38bdf8',
+          bodyColor: '#f43f5e',
           borderColor: '#1e293b',
           borderWidth: 1,
           callbacks: {
-            label: (ctx) => ` $${ctx.parsed.y.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`
+            label: (ctx) => ` -$${ctx.parsed.y.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN`
           }
         }
       },
@@ -243,7 +278,6 @@ function renderTrendChart(byDay) {
   });
 }
 
-// --- GRÁFICO DE DONA POR CATEGORÍA ---
 function renderCategoryChart(byCategory) {
   const ctx = document.getElementById("categoryChart").getContext("2d");
   const legendDiv = document.getElementById("category-legend");
@@ -256,7 +290,6 @@ function renderCategoryChart(byCategory) {
   const data = byCategory.map(c => c.total);
   const colors = labels.map(l => CATEGORY_COLORS[l] || "#94a3b8");
 
-  // Actualizar leyenda personalizada
   legendDiv.innerHTML = byCategory.map(c => {
     if (c.category === "Sin gastos aún") return "";
     const color = CATEGORY_COLORS[c.category] || "#94a3b8";
@@ -310,10 +343,10 @@ function renderCategoryChart(byCategory) {
   });
 }
 
-// --- CARGAR Y MANEJAR TABLA DE TRANSACCIONES ---
+// --- CARGAR Y FILTRAR TABLA ---
 async function loadInitialTransactions() {
   try {
-    const res = await fetch("/api/transactions?limit=100");
+    const res = await fetch("/api/transactions?limit=150");
     allTransactions = await res.json();
     renderTransactionsTable();
   } catch (err) {
@@ -323,13 +356,31 @@ async function loadInitialTransactions() {
 
 function renderTransactionsTable() {
   const tbody = document.getElementById("transactions-tbody");
+  const flowFilter = document.getElementById("flow-filter").value;
   const catFilter = document.getElementById("category-filter").value;
   const search = document.getElementById("search-input").value.toLowerCase();
 
   const filtered = allTransactions.filter(tx => {
-    const matchesCat = (catFilter === "all" || tx.category === catFilter);
-    const matchesSearch = (!search || tx.merchant.toLowerCase().includes(search) || (tx.raw_text && tx.raw_text.toLowerCase().includes(search)));
-    return matchesCat && matchesSearch;
+    // Filtro de flujo
+    if (flowFilter === "egreso" && tx.flow_type === "ingreso") return false;
+    if (flowFilter === "ingreso" && tx.flow_type !== "ingreso") return false;
+    if (flowFilter === "transfer") {
+      const isTransfer = (tx.transaction_type && tx.transaction_type.toLowerCase().includes("transferencia")) ||
+                         (tx.category && tx.category.toLowerCase().includes("transferencia"));
+      if (!isTransfer) return false;
+    }
+
+    // Filtro de categoría
+    if (catFilter !== "all" && tx.category !== catFilter) return false;
+
+    // Filtro de búsqueda
+    if (search) {
+      const textMatch = (tx.merchant && tx.merchant.toLowerCase().includes(search)) ||
+                        (tx.raw_text && tx.raw_text.toLowerCase().includes(search));
+      if (!textMatch) return false;
+    }
+
+    return true;
   });
 
   document.getElementById("tx-total-badge").textContent = filtered.length;
@@ -337,9 +388,9 @@ function renderTransactionsTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="text-center py-12 text-slate-500">
+        <td colspan="7" class="text-center py-12 text-slate-500">
           <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
-          No hay compras que coincidan con la búsqueda.
+          No hay movimientos que coincidan con la búsqueda.
         </td>
       </tr>
     `;
@@ -352,15 +403,31 @@ function renderTransactionsTable() {
 }
 
 function createRowHtml(tx, isNew = false) {
-  const icon = CATEGORY_ICONS[tx.category] || "tag";
-  const catColor = CATEGORY_COLORS[tx.category] || "#94a3b8";
-  const digits = tx.card_digits ? `•••• ${tx.card_digits}` : "Débito";
+  const isIncome = tx.flow_type === "ingreso";
+  const icon = CATEGORY_ICONS[tx.category] || (isIncome ? "download" : "shopping-cart");
+  const catColor = CATEGORY_COLORS[tx.category] || (isIncome ? "#10b981" : "#f43f5e");
+  const digits = tx.card_digits ? `•••• ${tx.card_digits}` : (tx.card_type || "Débito");
   const animateClass = isNew ? "new-tx-animate" : "";
+
+  // Badge de flujo
+  const flowBadge = isIncome 
+    ? `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-600/40 text-emerald-400 text-[10px] font-bold uppercase"><i data-lucide="arrow-down-left" class="w-3 h-3"></i><span>Ingreso</span></span>`
+    : `<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-rose-950/80 border border-rose-600/40 text-rose-400 text-[10px] font-bold uppercase"><i data-lucide="arrow-up-right" class="w-3 h-3"></i><span>Gasto</span></span>`;
+
+  // Monto con signo y color
+  const amountHtml = isIncome
+    ? `<span class="font-black text-emerald-400 text-sm">+$${tx.amount.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`
+    : `<span class="font-black text-rose-400 text-sm">-$${tx.amount.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`;
 
   return `
     <tr id="tx-row-${tx.id}" class="border-b border-slate-800/40 hover:bg-slate-800/30 transition ${animateClass}">
       
-      <!-- Comercio y Detalle -->
+      <!-- Flujo -->
+      <td class="py-3 px-4">
+        ${flowBadge}
+      </td>
+
+      <!-- Comercio / Origen / Destino -->
       <td class="py-3 px-4">
         <div class="flex items-center space-x-3">
           <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background-color: ${catColor}15; color: ${catColor}; border: 1px solid ${catColor}30">
@@ -398,9 +465,7 @@ function createRowHtml(tx, isNew = false) {
 
       <!-- Monto -->
       <td class="py-3 px-4 text-right">
-        <span class="font-black text-rose-400 text-sm">
-          -$${tx.amount.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </span>
+        ${amountHtml}
         <span class="text-[10px] text-slate-500 ml-0.5 font-mono">MXN</span>
       </td>
 
@@ -418,8 +483,7 @@ function prependTransactionRow(tx) {
   allTransactions.unshift(tx);
   const tbody = document.getElementById("transactions-tbody");
   
-  // Si antes decía 'Esperando compras...', limpiar
-  if (tbody.innerText.includes("Esperando compras") || tbody.innerText.includes("No hay compras")) {
+  if (tbody.innerText.includes("Esperando") || tbody.innerText.includes("No hay movimientos")) {
     tbody.innerHTML = "";
   }
   
@@ -434,9 +498,7 @@ function prependTransactionRow(tx) {
 
 function replaceTransactionRow(tx) {
   const idx = allTransactions.findIndex(t => t.id === tx.id);
-  if (idx !== -1) {
-    allTransactions[idx] = tx;
-  }
+  if (idx !== -1) allTransactions[idx] = tx;
   const existingRow = document.getElementById(`tx-row-${tx.id}`);
   if (existingRow) {
     existingRow.outerHTML = createRowHtml(tx);
@@ -455,19 +517,18 @@ function filterTransactions() {
   renderTransactionsTable();
 }
 
-// --- ACCIONES CRUD ---
 async function deleteTx(id) {
-  if (!confirm("¿Deseas eliminar este registro de gasto?")) return;
+  if (!confirm("¿Deseas eliminar este registro?")) return;
   try {
     await fetch(`/api/transactions/${id}`, { method: "DELETE" });
   } catch (err) {
-    alert("Error al eliminar la transacción: " + err);
+    alert("Error al eliminar: " + err);
   }
 }
 
 async function promptBudget() {
   const current = document.getElementById("kpi-total-budget").textContent.replace(/\D/g, "");
-  const input = prompt("Ingresa tu presupuesto mensual en MXN:", current || "15000");
+  const input = prompt("Ingresa tu presupuesto mensual de gastos en MXN:", current || "15000");
   if (input && !isNaN(input) && Number(input) > 0) {
     await fetch("/api/budget", {
       method: "POST",
@@ -479,6 +540,7 @@ async function promptBudget() {
 
 async function submitManualExpense(e) {
   e.preventDefault();
+  const flow = document.getElementById("man-flow").value;
   const amount = parseFloat(document.getElementById("man-amount").value);
   const merchant = document.getElementById("man-merchant").value;
   const category = document.getElementById("man-category").value;
@@ -493,7 +555,8 @@ async function submitManualExpense(e) {
         amount: amount,
         merchant: merchant,
         category: category,
-        transaction_type: "Compra",
+        flow_type: flow,
+        transaction_type: flow === "ingreso" ? "Depósito/Transferencia" : "Compra/Envío",
         card_type: "Débito"
       })
     });
@@ -504,7 +567,6 @@ async function submitManualExpense(e) {
   }
 }
 
-// --- SIMULADOR DE NOTIFICACIONES ---
 async function sendSimulatePreset(preset) {
   try {
     await fetch("/api/simulate", {
@@ -539,17 +601,10 @@ async function sendSimulateCustom() {
   }
 }
 
-// --- MODALES Y UTILIDADES ---
 function openModal(id) {
   const m = document.getElementById(id);
   m.classList.remove("hidden");
   m.classList.add("flex");
-  
-  if (id === 'setup-modal') {
-    // Actualizar URL sugerida
-    const input = document.getElementById("webhook-url-input");
-    input.value = `${window.location.origin}/api/webhook/bbva`;
-  }
 }
 
 function closeModal(id) {
@@ -558,16 +613,7 @@ function closeModal(id) {
   m.classList.remove("flex");
 }
 
-function copyWebhookUrl() {
-  const input = document.getElementById("webhook-url-input");
-  input.select();
-  navigator.clipboard.writeText(input.value);
-  alert("¡URL copiada al portapapeles! Pégala en MacroDroid en tu Samsung A56.");
-}
-
-// Iniciar aplicación al cargar el DOM
 window.addEventListener("DOMContentLoaded", () => {
   lucide.createIcons();
   initWebSocket();
 });
-

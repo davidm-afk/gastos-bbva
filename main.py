@@ -17,9 +17,8 @@ from database import (
 from models import WebhookPayload, ManualTransaction, UpdateTransaction, UpdateBudget
 from parser_bbva import parse_bbva_notification
 
-app = FastAPI(title="Control de Gastos BBVA - Tiempo Real")
+app = FastAPI(title="Control de Finanzas BBVA - Ingresos y Gastos en Tiempo Real")
 
-# Permitir CORS para acceso desde cualquier origen (móvil, túneles, etc.)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,7 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Gestor de conexiones WebSocket para actualización en vivo
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -50,24 +48,20 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Inicializar Base de Datos al arrancar
 @app.on_event("startup")
 def startup_event():
     init_db()
 
-# WebSocket para el Dashboard en la PC
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # Enviar estado inicial inmediato al conectar
         analytics = get_analytics()
         await websocket.send_text(json.dumps({
             "event": "INITIAL_STATE",
             "analytics": analytics
         }))
         while True:
-            # Mantener conexión viva
             data = await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -79,10 +73,6 @@ async def websocket_endpoint(websocket: WebSocket):
 # -------------------------------------------------------------
 @app.post("/api/webhook/bbva")
 async def webhook_bbva(request: Request):
-    """
-    Punto de entrada para el celular (MacroDroid o App).
-    Acepta tanto JSON estructurado como Form Data o texto plano.
-    """
     body_text = ""
     title = "BBVA"
     timestamp = None
@@ -96,7 +86,6 @@ async def webhook_bbva(request: Request):
             title = data.get("title") or data.get("notification_title") or "BBVA"
             timestamp = data.get("timestamp")
         else:
-            # Intento por form-data o texto plano
             raw_bytes = await request.body()
             body_text = raw_bytes.decode("utf-8", errors="ignore")
     except Exception as e:
@@ -105,24 +94,20 @@ async def webhook_bbva(request: Request):
     if not body_text:
         return JSONResponse(status_code=400, content={"status": "error", "message": "No se recibió texto de notificación"})
 
-    # Parsear notificación con el motor BBVA
     parsed = parse_bbva_notification(body_text, title)
     
     if not parsed:
-        # Notificación informativa o publicidad (ej. 'Contrata un seguro')
         return {
             "status": "ignored",
-            "message": "Notificación recibida pero no contiene una compra o débito bancario",
+            "message": "Notificación recibida pero no contiene movimiento financiero válido",
             "raw_text": body_text
         }
 
     if timestamp:
         parsed["timestamp"] = timestamp
 
-    # Guardar en base de datos SQLite
     saved_tx = insert_transaction(parsed)
 
-    # Notificar inmediatamente al Dashboard en la PC vía WebSocket
     analytics = get_analytics()
     await manager.broadcast({
         "event": "NEW_TRANSACTION",
@@ -132,12 +117,12 @@ async def webhook_bbva(request: Request):
 
     return {
         "status": "success",
-        "message": "Gasto registrado y transmitido a la PC en tiempo real",
+        "message": f"{'Ingreso' if saved_tx['flow_type'] == 'ingreso' else 'Gasto'} registrado y transmitido",
         "transaction": saved_tx
     }
 
 # -------------------------------------------------------------
-# SIMULADOR (Para probar desde la PC con 1 click)
+# SIMULADOR (Para probar compras, transferencias e ingresos con 1 clic)
 # -------------------------------------------------------------
 @app.post("/api/simulate")
 async def simulate_transaction(payload: dict):
@@ -145,19 +130,26 @@ async def simulate_transaction(payload: dict):
     custom_text = payload.get("text")
 
     samples = {
+        # Egresos / Compras
         "oxxo": "BBVA México: Compra por $48.50 en OXXO TERMINAL 42 con t. débito terminación 8921 el 30/10/2026.",
         "uber": "BBVA México: Compra por $142.30 en UBER RIDES con t. débito terminación 8921.",
         "walmart": "BBVA México: Compra por $890.00 en WALMART SUPERCENTER con t. débito terminación 8921.",
         "farmacia": "BBVA México: Compra por $215.00 en FARMACIAS GUADALAJARA con t. débito terminación 8921.",
-        "starbucks": "BBVA México: Compra por $115.00 en STARBUCKS PLAZA con t. débito terminación 8921.",
-        "gasolina": "BBVA México: Compra por $500.00 en GASOLINERA PEMEX con t. débito terminación 8921."
+        # Transferencia Enviada (Egreso)
+        "trans_enviada": "BBVA México: Transferencia enviada por $350.00 a MARIO PEREZ con cuenta terminación 4321 el 30/10/2026.",
+        # Transferencia Recibida (Ingreso)
+        "trans_recibida": "BBVA México: Transferencia recibida por $1,800.00 de CARLOS SANCHEZ el 30/10/2026.",
+        # Nómina (Ingreso)
+        "nomina": "BBVA México: Abono de nómina por $12,500.00 en tu cuenta de débito terminación 8921.",
+        # Depósito en Efectivo (Ingreso)
+        "deposito": "BBVA México: Depósito por $1,000.00 en efectivo en practicaja a tu cuenta débito."
     }
 
     text_to_process = custom_text if custom_text else samples.get(preset, samples["oxxo"])
     
     parsed = parse_bbva_notification(text_to_process, "BBVA México")
     if not parsed:
-        raise HTTPException(status_code=400, detail="El texto simulado no pudo ser parseado como gasto")
+        raise HTTPException(status_code=400, detail="El texto simulado no pudo ser parseado como movimiento bancario")
 
     saved_tx = insert_transaction(parsed)
     analytics = get_analytics()
@@ -171,11 +163,11 @@ async def simulate_transaction(payload: dict):
     return {"status": "success", "transaction": saved_tx}
 
 # -------------------------------------------------------------
-# APIS PARA EL DASHBOARD (CRUD & METRICAS)
+# APIS PARA EL DASHBOARD
 # -------------------------------------------------------------
 @app.get("/api/transactions")
-def api_get_transactions(limit: int = 100, category: Optional[str] = None, month: Optional[str] = None):
-    return get_transactions(limit=limit, category=category, month=month)
+def api_get_transactions(limit: int = 150, category: Optional[str] = None, flow_type: Optional[str] = None, month: Optional[str] = None):
+    return get_transactions(limit=limit, category=category, flow_type=flow_type, month=month)
 
 @app.post("/api/transactions")
 async def api_add_transaction(tx: ManualTransaction):
@@ -194,7 +186,7 @@ async def api_add_transaction(tx: ManualTransaction):
 
 @app.put("/api/transactions/{tx_id}")
 async def api_update_transaction(tx_id: int, update_data: UpdateTransaction):
-    updated = update_transaction(tx_id, category=update_data.category, merchant=update_data.merchant)
+    updated = update_transaction(tx_id, category=update_data.category, merchant=update_data.merchant, flow_type=update_data.flow_type)
     if not updated:
         raise HTTPException(status_code=404, detail="Transacción no encontrada")
     
@@ -234,10 +226,8 @@ async def api_set_budget(budget_data: UpdateBudget):
     })
     return {"status": "ok", "budget": budget_data.budget}
 
-# Montar archivos estáticos para el frontend
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if not os.path.exists(STATIC_DIR):
     os.makedirs(STATIC_DIR)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
-
