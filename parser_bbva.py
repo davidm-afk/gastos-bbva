@@ -148,7 +148,7 @@ def parse_bbva_notification(text: str, title: str = "") -> Optional[Dict[str, An
         card_type = "Cuenta Débito"
     
     card_digits = ""
-    digits_match = re.search(r'(?:terminaci[oó]n|tarjeta|cuenta|t\.\s*d[eé]bito|t\.\s*cr[eé]dito)\s*[:#*]?\s*(\d{4})', cleaned_text, re.IGNORECASE)
+    digits_match = re.search(r'(?:terminaci[oó]n|tarjeta|cuenta|t\.\s*d[eé]bito|t\.\s*cr[eé]dito)\s*[:#*]?\s*\*?(\d{4,6})', cleaned_text, re.IGNORECASE)
     if digits_match:
         card_digits = digits_match.group(1)
 
@@ -161,12 +161,14 @@ def parse_bbva_notification(text: str, title: str = "") -> Optional[Dict[str, An
         elif "practicaja" in lower_text:
             merchant = "Depósito en Practicaja"
         else:
-            # Extraer quién envió el dinero: "de [NOMBRE]"
-            sender_match = re.search(r'\bde\s+([^,\.]+?)(?:\s+el\s+\d|\s+con\s+cuenta|\s+en\s+tu|\s*\.|$)', cleaned_text, re.IGNORECASE)
-            if sender_match:
+            # Extraer quién envió el dinero: "de [NOMBRE]" (asegurando que no sea el monto monetario)
+            sender_match = re.search(r'\bde\s+([A-Za-zÁ-ÿ][A-Za-zÁ-ÿ\s]{2,40}?)(?:\s+el\s+\d|\s+con\s+cuenta|\s+en\s+tu|\s*\.|$)', cleaned_text, re.IGNORECASE)
+            if sender_match and not any(w in sender_match.group(1).lower() for w in ["cuenta", "debito", "credito"]):
                 sender = sender_match.group(1).strip()
                 sender = re.sub(r'^(una|un)\s+', '', sender, flags=re.IGNORECASE)
                 merchant = f"De: {sender.upper()}"
+            elif card_digits:
+                merchant = f"Abono a tu cuenta *{card_digits}"
             else:
                 merchant = "Depósito / Abono Recibido"
     else:
