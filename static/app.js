@@ -548,7 +548,7 @@ async function submitManualExpense(e) {
   if (!amount || !merchant) return;
 
   try {
-    await fetch("/api/transactions", {
+    const res = await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -560,6 +560,11 @@ async function submitManualExpense(e) {
         card_type: "Débito"
       })
     });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ detail: `Error ${res.status}: ${res.statusText}` }));
+      alert("Error al guardar: " + (errData.detail || res.statusText));
+      return;
+    }
     closeModal('manual-modal');
     document.getElementById("manual-form").reset();
   } catch (err) {
@@ -569,11 +574,16 @@ async function submitManualExpense(e) {
 
 async function sendSimulatePreset(preset) {
   try {
-    await fetch("/api/simulate", {
+    const res = await fetch("/api/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ preset: preset })
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `Error ${res.status}: ${res.statusText}` }));
+      alert("Error en simulación: " + (err.detail || res.statusText));
+      return;
+    }
     closeModal('sim-modal');
   } catch (err) {
     alert("Error en simulación: " + err);
@@ -590,8 +600,8 @@ async function sendSimulateCustom() {
       body: JSON.stringify({ text: text })
     });
     if (!res.ok) {
-      const err = await res.json();
-      alert("Error: " + err.detail);
+      const err = await res.json().catch(() => ({ detail: `Error ${res.status}: ${res.statusText}` }));
+      alert("Error: " + (err.detail || res.statusText));
       return;
     }
     closeModal('sim-modal');

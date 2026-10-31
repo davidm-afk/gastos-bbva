@@ -233,7 +233,7 @@ def get_analytics(month: Optional[str] = None) -> Dict[str, Any]:
         "total_month": round(total_expenses, 2),  # Gastos totales del mes
         "total_income_month": round(total_income, 2), # Ingresos totales del mes
         "net_balance": net_balance, # Saldo neto (Ingresos - Gastos)
-        "total_today": round(total_expenses_today, 2),
+        "total_today": round(total_today_expenses, 2),
         "total_income_today": round(total_today_income, 2),
         "count_expenses": count_expenses,
         "count_income": count_income,
